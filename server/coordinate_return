@@ -58,7 +58,7 @@ function coordinate_return(dock_coords)
                 if (message_count > int(#dock_coords/3)) then
                     resendMessage(id)
                 elseif (#messages_since_last_response < int(#dock_coords/2) and total_message_counter > int(#dock_coords/2)) then
-                    rednet.broadcast("return to dock")
+                    rednet.broadcast("turtles return to dock")
                 end
             end
         end
