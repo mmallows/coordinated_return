@@ -1,0 +1,118 @@
+function coordinate_return(dock_coords)
+
+    rednet.broadcast("turtles return to dock")
+    local num_of_docks
+    if(type(dock_coords) == "table") then
+        num_of_docks == #dock_coords
+    else
+        print("invalid input: dock_coords")
+    end
+
+    local success_count = 0 --count num of successful turtles
+    local turtle_state = {} --track turtle state
+    --[[
+        0: turtle not sent current coords
+        1: turtle waiting for new coords
+        2: turtle received new coords, moving to dock
+        3: turtle arrived at dock -> success
+    --]]
+    local dock_table = {} --table associating dock (by index of dock_coords) to computer id
+    local messages_since_last_response = {}
+    local total_message_counter = 0
+--ACTUAL FUNCTION: message checking, progress tracking
+    while success_count < num_of_docks do
+        local id, message = rednet.receive()
+        total_message_counter = total_message_counter + 1
+        if message[1] == "current coords" then
+            local funcCode = assignDock(dock_coords, message[2], id)
+            if funcCode == false then
+                print("error assigning dock for turtle: "..tostring(id))
+                return false
+            elseif funcCode == -1 then
+                print("machine "..id.." already assigned to dock")
+            else
+                turtle_state[id] = 1
+                rednet.send(id, dock_coords[funcCode])
+            end
+        elseif message[1] == "new coord confirm" then
+            if turtle_state[id] < 2 then
+                turtle_state[id] = 2
+            end
+        elseif message[1] == "final confirm" then
+            turtle_state[id] = 3
+            rednet.send(id, "acknowledge")
+        else
+            print("unknown message: "..tostring(message).."from "..tostring(id))
+        end
+        local success_recount = 0
+        for turt, state in pairs(turtle_state) do
+            if state == 3 then 
+                success_recount = success_recount + 1
+            end
+        end
+        for turt, message_count in pairs(messages_since_last_response) do
+            if turt == id then
+                messages_since_last_response[id] = 0
+            elseif turtle_state[id] ~= 3 then
+                message_count = message_count + 1
+                if (message_count > int(#dock_coords/3)) then
+                    resendMessage(id)
+                elseif (#messages_since_last_response < int(#dock_coords/2) and total_message_counter > int(#dock_coords/2)) then
+                    rednet.broadcast("return to dock")
+                end
+            end
+        end
+        messages_since_last_response[id] = 0
+        success_count = success_recount
+    end
+
+--INNER FUNCTIONS
+    function assignDock(curr_coords, turtle_id)
+        --returns dock index if completes without error, false if turtle is unassignable
+        --returns -1 if turtle is already assigned
+        if turtle_state[turtle_id] then
+            print("turtle already assigned: "..turtle_id)
+            return -1
+        end
+        local nearest_index = -1 --index of nearest dock in dock_coords
+        local shortest_dist = math.huge
+        for i=1, num_of_docks do
+            if not (dock_table[i]) then
+                local distance = calcDistance(dock_coords[i], curr_coords)
+                if (distance < shortest_dist) then
+                    shortest_dist = distance
+                    nearest_index = i
+                end
+            end
+        end
+        if nearest_index > 0 then
+            dock_table[nearest_index] = turtle_id
+            return nearest_index
+        else
+            print("no available dock for turtle: "..tostring(turtle_id))
+            return false
+        function calcDistance(dock_coord, turtle_coords)
+            local dock_x, dock_y, dock_z = dock_coord
+            local turtle_x, turtle_y, turtle_z = turtle_coords
+            return math.abs(dock_x - turtle_x) + 
+                math.abs(dock_y - turtle_y) + 
+                math.abs(dock_z - turtle_z)
+        end --calcDistance()
+    end --assignDock()
+
+    function resendMessage(turtle_id)
+        local state = turtle_state[turtle_id]
+        if (state == 1) then
+            local dest_dock
+            for dock, computer in pairs(dock_table) do
+                if computer == turtle_id then
+                    dest_dock = dock
+                    break
+                end
+            end
+            rednet.send(turtle_id, dest_dock)
+        end
+    end
+
+end
+

@@ -24,19 +24,23 @@ function receiveDefenseSignal(orientation)
         new_coords, orientation = closeLargestGap({{cur_x, cur_y}, {new_x, new_y}}, orientation)
         cur_x, cur_y = new_coords
     end
-
+    print("reached dock")
     rednet.send(SERVER_ID, "final confirm")
     local event, id, message, dist = os.pullEvent("rednet_message")
-    if (id==)
+    if (message == "acknowledge") then
+        print("received acknowledge")
+        turtle.refuel()
+    else
+        print("unexpected message: "..tostring(message))
 
 end
 
 function getNewCoords()
-
+    local dest_coords
     local event, id, message, dist = 
         os.pullEvent("rednet_message")
     if type(message) == "table" then
-        local dest_coords = message
+        dest_coords = message
     end
     return dest_coords
 
