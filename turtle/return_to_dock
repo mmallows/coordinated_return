@@ -4,25 +4,20 @@ function receiveDefenseSignal(orientation)
     while not x do
         cur_x, cur_y, cur_z = gps.locate(2)
     end
-    local coord_message = {cur_x, cur_y, cur_z}
+    local coord_message = {"current coords", {cur_x, cur_y, cur_z}}
     print("gps success: "..tostring(cur_x)..", "..tostring(cur_y)..", "..tostring(cur_z))
     rednet.send(SERVER_ID, coord_message)
     local new_x, new_y, new_z = getNewCoords()
     print("new coords ascertained: "..tostring(new_x)..", "..tostring(new_y)..", "..tostring(new_z))
     rednet.send(SERVER_ID, "new coord confirm")
-    while not cur_z == new_z do
-        if (cur_z > new_z) then
-            turtle.down()
-        else
-            turtle.up()
-        end --if else
-    end --while -> new z acquired
-    print("new z acquired")
+    
     --local orientation = orientSelf()  --already oriented via passed param
-    while not({cur_x, cur_y} == {new_x, new_y}) do
+    while not({cur_x, cur_y, cur_z} == {new_x, new_y, new_z}) do
         local new_coords
-        new_coords, orientation = closeLargestGap({{cur_x, cur_y}, {new_x, new_y}}, orientation)
-        cur_x, cur_y = new_coords
+        new_coords, orientation = traverseAxis({{cur_x, cur_y, cur_z}, {new_x, new_y, new_z}}, orientation)
+        if new_coords then
+            cur_x, cur_y, cur_z = new_coords
+        else
     end
     print("reached dock")
     rednet.send(SERVER_ID, "final confirm")
@@ -69,7 +64,7 @@ function orientSelf() --returns string of current orientation or false if failed
 
 end
 
-function oturn(direction , orientation) --turns turtle, changes tracked orientation
+function oturn(orientation, direction) --turns turtle, changes tracked orientation
     --returns new orientation or false
     --prints on error
     local success
@@ -81,18 +76,20 @@ function oturn(direction , orientation) --turns turtle, changes tracked orientat
         [neg_y] = {neg_x, pos_x}}
     local oindex
 
-
     if direction == "left" then
         success = turtle.turnLeft()
         oindex = 1
     elseif direction == "right" then
-        success == turtle.turnRight()
+        success = turtle.turnRight()
         oindex = 2
     elseif not direction then
         print("failed oturn - direction: "..tostring(direction).." orientation: "..tostring(orientation))
         return false
     end
-    orientation = otable[orientation][oindex]
+    if success then 
+        orientation = otable[orientation][oindex]
+    else
+        print("failed to turn - x,y,z="..)
     if not orientation then
         print("failed oturn - direction: "..tostring(direction).." orientation: "..tostring(orientation))
     end
@@ -100,42 +97,62 @@ function oturn(direction , orientation) --turns turtle, changes tracked orientat
 
 end
 
-function closeLargestGap(positions, orientation) --finds largest diff in coords and closes gap
+function traverseAxis(coordinates, orientation, axis) --finds largest diff in coords and closes gap
     --returns {new coords, new orientation}
     --prints on error
 
-    local cur_pos, new_pos = positions
-    local cur_x, cur_y = cur_pos
-    local new_x, new_y = new_pos
-    local new_orientation = orientation
+    local cur_pos, dest_pos = coordinates
+    local cur_x, cur_y, cur_z = cur_pos
+    local dest_x, dest_y, dest_z = dest_pos
 
-    local x_diff = new_x - cur_x
-    local y_diff = new_y - cur_y
+    local x_diff = dest_x - cur_x
+    local y_diff = dest_y - cur_y
+    local z_diff = dest_z - cur_z
 
-    local pos_x, neg_x, pos_y, neg_y = "+x", "-x", "+y", "-y" --might have to convert to table list
+    local pos_x, neg_x, pos_y, neg_y, pos_z, neg_z = "+x", "-x", "+y", "-y", "+z", "-z" --might have to convert to table list
 
-    local moveTable = {
-        pos_x = {pos_x = turtle.forward(), neg_y = function() new_orientation = oturn("left", new_orientation) return (new_orientation and true) end, pos_y = function() new_orientation = oturn("right", new_orientation) return (new_orientation and true) end, neg_x = turtle.back()},
-        neg_x = {neg_x = turtle.forward(), pos_y = function() new_orientation = oturn("left", new_orientation) return (new_orientation and true) end, neg_y = function() new_orientation = oturn("right", new_orientation) return (new_orientation and true) end, pos_x = turtle.back()},
-        pos_y = {pos_y = turtle.forward(), pos_x = function() new_orientation = oturn("left", new_orientation) return (new_orientation and true) end, nex_x = function() new_orientation = oturn("right", new_orientation) return (new_orientation and true) end, neg_y = turtle.back()},
-        neg_y = {neg_y = turtle.forward(), neg_x = function() new_orientation = oturn("left", new_orientation) return (new_orientation and true) end, pos_x = function() new_orientation = oturn("right", new_orientation) return (new_orientation and true) end, pos_y = turtle.back()},
+    local moveTable = { --index into as moveTable[current_direction][dest_direction]
+        pos_x = {pos_x = turtle_forward(orientation), 
+            neg_y = turtle_turn(orientation, "left"), 
+            pos_y = turtle_turn(orientation, "right"), 
+            neg_x = turtle_back(orientation),
+            pos_z = turtle_up(),
+            neg_z = turtle_down()},
+        neg_x = {neg_x = turtle_forward(orientation), 
+            pos_y = turtle_turn(orientation, "left"), 
+            neg_y = turtle_turn(orientation, "right"), 
+            pos_x = turtle_back(orientation),
+            pos_z = turtle_up(),
+            neg_z = turtle_down()},
+        pos_y = {pos_y = turtle_forward(orientation), 
+            pos_x = turtle_turn(orientation, "left"), 
+            neg_x = turtle_turn(orientation, "right"), 
+            neg_y = turtle_back(orientation),
+            pos_z = turtle_up(),
+            neg_z = turtle_down()},
+        neg_y = {neg_y = turtle_forward(orientation), 
+            neg_x = turtle_turn(orientation, "left"), 
+            pos_x = turtle_turn(orientation, "right"), 
+            pos_y = turtle_back(orientation),
+            pos_z = turtle_up(),
+            neg_z = turtle_down()},
     }
 
-    local dest_orientation
+    local dest_direction
 
-    local largest_gap = math.max(math.abs(x_diff), math.abs(y_diff))
+    local largest_gap = math.max(math.abs(x_diff), math.abs(y_diff), math.abs(z_diff))
 
     if (largest_gap == math.abs(x_diff)) then
-        if (x_diff > SERVER_ID) then
-            dest_orientation = pos_x
+        if (x_diff > 0) then
+            dest_direction = pos_x
         else
-            dest_orientation = neg_x
+            dest_direction = neg_x
         end
-    else --largest gap is in y direction
-        if (y_diff > SERVER_ID) then
-            dest_orientation = pos_y
+    elseif (largest_gap == math.abs(y_diff)) --largest gap is in y direction
+        if (y_diff > 0) then
+            dest_direction = pos_y
         else
-            dest_orientation = neg_y
+            dest_direction = neg_y
         end
 
     end
@@ -144,16 +161,51 @@ function closeLargestGap(positions, orientation) --finds largest diff in coords 
         local status = false
         local j = 5
         while not status or j >= 1 do
-            status = moveTable[new_orientation][dest_orientation]
+            status = moveTable[orientation][dest_direction]
             if (j == 1) then
                 print("failed to close largest gap - unable to move toward home")
                 return false
         end
     end
 
-    local cur_z
-    cur_x, cur_y, cur_z = gps.locate(2)
+    --cur_x, cur_y, cur_z = gps.locate(2)
 
-    return {{cur_x, cur_y}, new_orientation}
+    return {{cur_x, cur_y, cur_z}, orientation}
+
+    function turtle_forward(orientation)
+        local coord_change_table = {
+            pos_x = function() cur_x = cur_x + 1 end,
+            neg_x = function() cur_x = cur_x - 1 end,
+            pos_y = function() cur_y = cur_y + 1 end,
+            neg_y = function() cur_y = cur_y - 1 end,
+        }
+        local success = turtle.forward()
+        if success then coord_change_table[orientation] end
+        return success
+    end
+    function turtle_turn(orientation, turn_direction)
+        local orientation = oturn(orientation, turn_direction)
+        return orientation and true --checks success of turn
+    end
+    function turtle_back(orientation)
+        local coord_change_table = {
+            pos_x = function() cur_x = cur_x - 1 end,
+            neg_x = function() cur_x = cur_x + 1 end,
+            pos_y = function() cur_y = cur_y - 1 end,
+            neg_y = function() cur_y = cur_y + 1 end,
+        }
+        local success = turtle.back()
+        if success then coord_change_table[orientation] end
+        return success
+    end
+    function turtle_up()
+        local success = turtle.up()
+        if success then cur_z = cur_z + 1 end
+        return success
+    end
+    function turtle_down()
+        local success = turtle.down()
+        if success then cur_z = cur_z - 1 end
+    end
 
 end
